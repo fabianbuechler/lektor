@@ -8,5 +8,9 @@
     <img src="{{ t|url }}" width="{{ t.width }}" height="{{ t.height }}">
     {% set tq = img.thumbnail(192, 256, False, quality=20) %}
     <img src="{{ tq|url }}" width="{{ tq.width }}" height="{{ tq.height }}">
+    {% set th = img.thumbnail(192, 192, False, quality=30) %}
+    <img src="{{ th|url }}" width="{{ th.width }}" height="{{ th.height }}">
+    {% set tc = img.thumbnail(192, 192, True, quality=40) %}
+    <img src="{{ tc|url }}" width="{{ tc.width }}" height="{{ tc.height }}">
   {% endfor %}
 {% endblock %}

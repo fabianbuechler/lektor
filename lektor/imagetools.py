@@ -363,21 +363,48 @@ def get_quality(source_filename):
     return 85
 
 
-def computed_height(source_image, width, actual_width, actual_height):
+def is_rotated(source_image, format):
+    """Read ``is_rotated`` EXIF flag."""
+    is_rotated = False
+    if format == 'jpeg':
+        with open(source_image, 'rb') as f:
+            exif = read_exif(f)
+            is_rotated = exif.is_rotated
+    return is_rotated
+
+
+def computed_size(
+    source_image, width, height, actual_width, actual_height, format
+):
+    """Compute effective thumbnail size."""
     # If the file is a JPEG file and the EXIF header shows that the image
     # is rotated, imagemagick will auto-orient the file. That is, a 400x200
     # file where the target width is 100px will *not* be converted to a
     # 100x50 image, but to 100x200.
+    # Thus, for portrait images or rotated landscape images, we flip width
+    # and height.
+    if is_rotated(source_image, format):
+        actual_width, actual_height = actual_height, actual_width
 
-    with open(source_image, 'rb') as f:
-        format = get_image_info(f)[0]
+    def scale_proportially(same, other, target):
+        return int(float(other) * (float(target) / float(same)))
 
-    if format == 'jpeg':
-        with open(source_image, 'rb') as image_file:
-            exif = read_exif(image_file)
-        if exif.is_rotated:
-            actual_width, actual_height = actual_height, actual_width
-    return int(float(actual_height) * (float(width) / float(actual_width)))
+    # No height defined, adapt proportionally to width.
+    if height is None:
+        reported_width = width
+        reported_height = scale_proportially(actual_width, actual_height, width)
+    # Thumb width and height defined, proportionally scale actual_width and
+    # actual_height to fit.
+    else:
+        reported_width = min(
+            scale_proportially(actual_height, actual_width, height),
+            width
+        )
+        reported_height = min(
+            scale_proportially(actual_width, actual_height, width),
+            height
+        )
+    return (reported_width, reported_height)
 
 
 def process_image(ctx, source_image, dst_filename, width, height=None,
@@ -424,13 +451,18 @@ def make_thumbnail(ctx, source_image, source_url_path, width, height=None,
     suffix = get_suffix(width, height, crop=crop, quality=quality)
     dst_url_path = get_dependent_url(source_url_path, suffix,
                                      ext=get_thumbnail_ext(source_image))
-    report_height = height
 
+    report_width = width
+    report_height = height
+    # We can only crop if a height is specified
     if height is None:
-        # we can only crop if a height is specified
         crop = False
-        report_height = computed_height(source_image, width, source_width,
-                                        source_height)
+    # Update reported thumb size unless cropping, so that Thumbnail.height
+    # matches the actual thumb dimensions.
+    if not crop:
+        report_width, report_height = computed_size(
+            source_image, width, height, source_width, source_height, format,
+        )
 
     # If we are dealing with an actual svg image, we do not actually
     # resize anything, we just return it.  This is not ideal but it's
@@ -444,7 +476,7 @@ def make_thumbnail(ctx, source_image, source_url_path, width, height=None,
         process_image(ctx, source_image, artifact.dst_filename,
                       width, height, crop=crop, quality=quality)
 
-    return Thumbnail(dst_url_path, width, report_height)
+    return Thumbnail(dst_url_path, report_width, report_height)
 
 
 class Thumbnail(object):

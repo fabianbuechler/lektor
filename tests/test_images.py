@@ -1,7 +1,10 @@
 import os
 from datetime import datetime
 
+import pytest
+
 from lektor._compat import iteritems
+from lektor.imagetools import computed_size
 
 
 def almost_equal(a, b, e=0.00001):
@@ -56,6 +59,56 @@ def test_image_attributes(pad):
     assert image.format == 'jpeg'
 
 
+@pytest.mark.parametrize(
+    [
+        'width', 'height', 'source_width', 'source_height',
+        'is_rotated', 'expected_width', 'expected_height'
+    ],
+    [
+        # Not rotated.
+        # No height specified, calculated proportionally.
+        (256, None, 512, 384, False, 256, 192),
+        # Height specified but greater than calculated height.
+        (256, 256, 512, 384, False, 256, 192),
+        # Height specified and less than calculated height with scaled width, so
+        # with is scaled down as well.
+        (256, 150, 512, 384, False, 200, 150),
+
+        # Rotated image.
+        # No height, specified. Image rotated, height used as width and original
+        # width scaled proportionally.
+        (256, None, 512, 384, True, 256, 341),
+        # Height specified.
+        (256, 256, 512, 384, True, 192, 256),
+        # Height specified and less than rotated width.
+        (256, 150, 512, 384, True, 112, 150),
+    ]
+)
+def test_computed_size(
+    mocker,
+    width,
+    height,
+    source_width,
+    source_height,
+    is_rotated,
+    expected_width,
+    expected_height,
+):
+    """Test reported width/height are as expected when computing thumb size."""
+    with mocker.patch('lektor.imagetools.is_rotated', return_value=is_rotated):
+        reported_width, reported_height = computed_size(
+            source_image=mocker.MagicMock(),
+            width=width,
+            height=height,
+            actual_width=source_width,
+            actual_height=source_height,
+            format='jpeg',
+        )
+    assert (
+        (reported_width, reported_height) == (expected_width, expected_height)
+    )
+
+
 def test_thumbnail_height(builder):
     builder.build_all()
     with open(os.path.join(builder.destination_path, 'index.html')) as f:
@@ -63,6 +116,18 @@ def test_thumbnail_height(builder):
 
     # Thumbnail is half the original width, so its computed height is half.
     assert '<img src="./test@192.jpg" width="192" height="256">' in html
+    # With defined height (tq) matching the computed_height.
+    assert '<img src="./test@192x256_q20.jpg" width="192" height="256">' in html
+    # With defined height (th) not matching the computed_height, image is scaled
+    # proportionally and real thumbnail height is reported.
+    assert '<img src="./test@192x192_q30.jpg" width="144" height="192">' in html
+    # With cropping enabled the defined with/height will be the exact thumb
+    # dimensions.
+    assert (
+        '<img src="./test@192x192_crop_q40.jpg" width="192" height="192">'
+        in html
+    )
+
 
 def test_thumbnail_quality(builder):
     builder.build_all()
